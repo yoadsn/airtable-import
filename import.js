@@ -3,7 +3,7 @@ import Airtable from 'airtable'
 import slug from 'slug';
 import addressParser from 'parse-address';
 import GoogleMaps from '@google/maps';
-import { ATIDMapping, Space, Maker, Item, Pop, View } from './mongoschema.js'
+import { ATIDMapping, Space, Maker, Item, Pop, View, Image } from './mongoschema.js'
 
 let googleMapsClient = GoogleMaps.createClient({
   key: process.env.GOOGLE_API_KEY,
@@ -13,7 +13,7 @@ let googleMapsClient = GoogleMaps.createClient({
 slug.defaults.mode = 'rfc3986';
 
 const getAirTableBase = () => {
-  let base = new Airtable({ apiKey: process.env.AIRTABLE_API_KEY}).base(AIRTABLE_BASE_NAME);
+  let base = new Airtable({ apiKey: process.env.AIRTABLE_API_KEY}).base(process.env.AIRTABLE_BASE_NAME);
   return base;
 }
 
@@ -29,10 +29,19 @@ const getLocalIdForRemoteId = async (remoteId) => {
   return idmap.localId;
 }
 
-const loadFromAirTable = async (base, table) => {
+const getImageDataFromImageRemoteId = async (remoteId) => {
+  console.dir(remoteId);
+  if (!remoteId || remoteId.length == 0) return null;
+  console.log('looking...');
+  let localImageId = await getLocalIdForRemoteId(remoteId[0]);
+  let image = await Image.findOne({ _id: localImageId});
+  return image && image.toObject();
+}
+
+const loadFromAirTable = async (base, table, select = {}) => {
   let allRecords = [];
   return new Promise((res, rej) => {
-    base(table).select({ })
+    base(table).select(select)
     .eachPage((records, fetchNextPage) => {
       allRecords = allRecords.concat(records)
       fetchNextPage()
@@ -48,8 +57,10 @@ const loadFromAirTable = async (base, table) => {
 const storeToDB = async (importedRecords, Model, extractRecordData, remoteIdGenerator = (id) => id) => {
   await importedRecords.reduce((acc, curr, idx) => {
     const storeOne = async () => {
+      console.log(curr.get('ID'));
       let localId = await getLocalIdForRemoteId(remoteIdGenerator(curr.getId()))
       let extractedData = await extractRecordData(curr);
+      console.log(extractedData.titleImage);
       await Model.findOneAndUpdate({ _id: localId}, extractedData, { upsert: true })
     }
 
@@ -93,25 +104,26 @@ const generateBasedAtFromPlaceID = async (placeId) =>
   googleMapsClient.place({ placeid: placeId}).asPromise()
     .then(response => generateBasedAtFromGooglePlaceResult(response.json.result));
 
-const extractSpaceData = async (importedSpaceRecord) => ({
-  name: importedSpaceRecord.get('Name'),
-  googleSpaceId: importedSpaceRecord.get('Google Space ID'),
-  slug: slug(importedSpaceRecord.get('Name')),
-  descriptionHtml: importedSpaceRecord.get('Description'),
-  logoImage: importedSpaceRecord.get('Logo Image'),
-  titleImage: importedSpaceRecord.get('Title Image'),
-  externalUrl: importedSpaceRecord.get('Site URL'),
-  type: importedSpaceRecord.get('Space Type'),
-  spaceBasedAt: await generateBasedAtFromPlaceID(importedSpaceRecord.get('Google Space ID')),
+const extractSpaceData = async (importedRecord) => ({
+  name: importedRecord.get('Name'),
+  googleSpaceId: importedRecord.get('Google Space ID'),
+  slug: slug(importedRecord.get('Name')),
+  descriptionHtml: importedRecord.get('Description'),
+  logoImage: await getImageDataFromImageRemoteId(importedRecord.get('Logo Image')),
+  titleImage: await getImageDataFromImageRemoteId(importedRecord.get('Title Image')),
+  externalUrl: importedRecord.get('Site URL'),
+  type: importedRecord.get('Space Type'),
+  spaceBasedAt: await generateBasedAtFromPlaceID(importedRecord.get('Google Space ID')),
 });
 
 const extractMakerData = async (importedRecord) => ({
   name: importedRecord.get('Name'),
   slug: slug(importedRecord.get('Name')),
   descriptionHtml: importedRecord.get('Description'),
-  logoImage: importedRecord.get('Logo Image'),
-  titleImage: importedRecord.get('Title Image'),
+  logoImage: await getImageDataFromImageRemoteId(importedRecord.get('Logo Image')),
+  titleImage: await getImageDataFromImageRemoteId(importedRecord.get('Title Image')),
   externalUrl: importedRecord.get('Site URL'),
+  type: importedRecord.get('Maker Type'),
   makerBasedAt: await generateBasedAtFromAddress(importedRecord.get('Location'))
 });
 
@@ -119,31 +131,47 @@ const extractItemData = async (importedRecord) => ({
   name: importedRecord.get('Name'),
   maker: await getLocalIdForRemoteId(importedRecord.get('Maker')),
   descriptionHtml: importedRecord.get('Description'),
-  titleImage: importedRecord.get('Item Image'),
+  titleImage: await getImageDataFromImageRemoteId(importedRecord.get('Item Image')),
   externalUrl: importedRecord.get('Shoppable Link'),
 });
 
 const extractViewData = async (importedRecord) => ({
   space: await getLocalIdForRemoteId(importedRecord.get('Space')),
-  titleImage: importedRecord.get('Closeup Pop Image') || importedRecord.get('Longhost POP Image'),
+  titleImage: await getImageDataFromImageRemoteId(importedRecord.get('Longhost POP Image'))
 });
 
 const extractPopData = async (importedRecord) => ({
   view: await getLocalIdForRemoteId(viewRemoteIdGeneratorFromPop(importedRecord.getId())),
   item: await getLocalIdForRemoteId(importedRecord.get('Item')),
-  descriptionHtml: importedRecord.get('Description')
+  descriptionHtml: importedRecord.get('Description'),
+  closeupImage: await getImageDataFromImageRemoteId(importedRecord.get('Closeup POP Image'))
+});
+
+const extractImageData = async (importedRecord) => ({
+  publicId: importedRecord.get('Public ID'),
+  creditsTo: importedRecord.get('Credits To'),
+  creditsLink: importedRecord.get('Credits Link')
 });
 
 const importEnabled = {
-  'spaces' : 1,
+  'images' : 0,
+  'spaces' : 0,
   'makers': 0,
   'items': 0,
-  'pops': 0
+  'pops': 1
 }
 
 export const runImport = async () => {
 
   let base = getAirTableBase();
+
+  if (importEnabled['images']) {
+    let images = await loadFromAirTable(base, 'images', { fields : ['Public ID', 'Credits To', 'Credits Link'] });
+    images = images.filter(space => space.get('Public ID'));
+    console.log(`got ${images.length} images`);
+    await storeToDB(images, Image, extractImageData);
+    console.log(`image storing done.`);
+  }
 
   if (importEnabled['spaces']) {
     let spaces = await loadFromAirTable(base, 'Spaces');
@@ -170,6 +198,7 @@ export const runImport = async () => {
 
   if (importEnabled['pops']) {
     let pops = await loadFromAirTable(base, 'Pops');
+    pops = pops.filter(pop => pop.get('Space') && pop.get('Item'));
     console.log(`got ${pops.length} pops`);
     await storeToDB(pops, View, extractViewData, viewRemoteIdGeneratorFromPop);
     await storeToDB(pops, Pop, extractPopData);

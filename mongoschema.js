@@ -14,32 +14,48 @@ var basedAtSchema = Schema({
   }
 }, { _id : false });
 
+var imageDataStructure = {
+  publicId: String,
+  creditsTo: String,
+  creditsLink: String,
+  dimensions : {
+    aspectRatio: Number
+  }
+};
+
+var imageDataSchema = Schema(imageDataStructure, { _id : false});
+
+var imageSchema = Schema(imageDataStructure);
+
 var makerSchema = Schema({
   name: String,
   slug: { type: String, index: true },
+  type: String,
   descriptionHtml: String,
-  logoImage: String,
-  titleImage: String,
+  logoImage: imageDataSchema,
+  titleImage: imageDataSchema,
   externalUrl: String,
   makerBasedAt: basedAtSchema
 })
 
 var itemSchema = Schema({
   name: String,
-  titleImage: String,
+  descriptionHtml: String,
+  titleImage: imageDataSchema,
   externalUrl: String,
   maker: { type: Schema.Types.ObjectId, ref: 'Maker' }
 })
 
 var popSchema = Schema({
-  description: String,
+  descriptionHtml: String,
   externalUrl: String,
+  closeupImage: imageDataSchema,
   item: { type: Schema.Types.ObjectId, ref: 'Item', index: true },
   view: { type: Schema.Types.ObjectId, ref: 'View', index: true },
 })
 
 var viewSchema = Schema({
-  titleImage: String,
+  titleImage: imageDataSchema,
   space: { type: Schema.Types.ObjectId, ref: 'Space' }
 })
 
@@ -47,9 +63,10 @@ var spaceSchema = Schema({
   name: String,
   googleSpaceId: String,
   slug: { type: String, index: true },
+  type: String,
   descriptionHtml: String,
-  logoImage: String,
-  titleImage: String,
+  logoImage: imageDataSchema,
+  titleImage: imageDataSchema,
   externalUrl: String,
   spaceBasedAt: basedAtSchema
 })
@@ -66,6 +83,7 @@ const Pop = mongoose.model('Pop', popSchema);
 const Item = mongoose.model('Item', itemSchema);
 const View = mongoose.model('View', viewSchema);
 const Space = mongoose.model('Space', spaceSchema);
+const Image = mongoose.model('Image', imageSchema);
 const ATIDMapping = mongoose.model('ATIDMapping', atIdMapping);
 
 export {
@@ -74,5 +92,6 @@ export {
   Item,
   View,
   Space,
+  Image,
   ATIDMapping
 };
