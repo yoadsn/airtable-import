@@ -20,6 +20,9 @@ var imageDataStructure = {
   creditsLink: String,
   dimensions : {
     aspectRatio: Number
+  },
+  metadata: {
+    leadColor: String
   }
 };
 

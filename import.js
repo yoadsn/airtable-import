@@ -1,4 +1,5 @@
 import mongoose, { Schema } from 'mongoose'
+import cloudinary from 'cloudinary';
 import Airtable from 'airtable'
 import slug from 'slug';
 import addressParser from 'parse-address';
@@ -17,6 +18,28 @@ const getAirTableBase = () => {
   return base;
 }
 
+const configureCloudinary = () => {
+  cloudinary.config({
+    cloud_name: 'wescover',
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
+  });
+};
+
+const getImageInformation = async (publicId) => {
+  return new Promise((res, rej) => {
+    cloudinary.api.resource(publicId, result => {
+      res({
+        width: result.width,
+        height: result.height,
+        leadColor: result.colors[0][0]
+      });
+    }, {
+      colors: true
+    });
+  });
+}
+
 const getLocalIdForRemoteId = async (remoteId) => {
   console.log(`Looking for remote id ${remoteId} in the DB.`);
   let idmap = await ATIDMapping.findOne({ remoteId });
@@ -30,9 +53,7 @@ const getLocalIdForRemoteId = async (remoteId) => {
 }
 
 const getImageDataFromImageRemoteId = async (remoteId) => {
-  console.dir(remoteId);
   if (!remoteId || remoteId.length == 0) return null;
-  console.log('looking...');
   let localImageId = await getLocalIdForRemoteId(remoteId[0]);
   let image = await Image.findOne({ _id: localImageId});
   return image && image.toObject();
@@ -57,10 +78,8 @@ const loadFromAirTable = async (base, table, select = {}) => {
 const storeToDB = async (importedRecords, Model, extractRecordData, remoteIdGenerator = (id) => id) => {
   await importedRecords.reduce((acc, curr, idx) => {
     const storeOne = async () => {
-      console.log(curr.get('ID'));
       let localId = await getLocalIdForRemoteId(remoteIdGenerator(curr.getId()))
       let extractedData = await extractRecordData(curr);
-      console.log(extractedData.titleImage);
       await Model.findOneAndUpdate({ _id: localId}, extractedData, { upsert: true })
     }
 
@@ -147,23 +166,38 @@ const extractPopData = async (importedRecord) => ({
   closeupImage: await getImageDataFromImageRemoteId(importedRecord.get('Closeup POP Image'))
 });
 
+const extractExtraImageInformation = async (publicId) => {
+  let imageData = await getImageInformation(publicId);
+  return {
+    dimensions: {
+        aspectRatio: imageData.width / imageData.height
+    },
+    metadata: {
+      leadColor: imageData.leadColor
+    }
+  }
+}
+
 const extractImageData = async (importedRecord) => ({
   publicId: importedRecord.get('Public ID'),
   creditsTo: importedRecord.get('Credits To'),
-  creditsLink: importedRecord.get('Credits Link')
+  creditsLink: importedRecord.get('Credits Link'),
+  ...(await extractExtraImageInformation(importedRecord.get('Public ID')))
 });
 
 const importEnabled = {
   'images' : 0,
-  'spaces' : 0,
-  'makers': 0,
-  'items': 0,
+  'spaces' : 1,
+  'makers': 1,
+  'items': 1,
   'pops': 1
 }
 
 export const runImport = async () => {
 
   let base = getAirTableBase();
+
+  configureCloudinary();
 
   if (importEnabled['images']) {
     let images = await loadFromAirTable(base, 'images', { fields : ['Public ID', 'Credits To', 'Credits Link'] });

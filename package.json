@@ -18,6 +18,7 @@
   "dependencies": {
     "@google/maps": "^0.3.0",
     "airtable": "^0.4.2",
+    "cloudinary": "^1.4.4",
     "express": "^4.14.0",
     "mongoose": "^4.6.3",
     "parse-address": "0.0.6",
