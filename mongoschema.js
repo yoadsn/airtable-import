@@ -38,7 +38,7 @@ var makerSchema = Schema({
   logoImage: imageDataSchema,
   titleImage: imageDataSchema,
   externalUrl: String,
-  makerBasedAt: basedAtSchema
+  basedAt: basedAtSchema
 })
 
 var itemSchema = Schema({
@@ -71,7 +71,7 @@ var spaceSchema = Schema({
   logoImage: imageDataSchema,
   titleImage: imageDataSchema,
   externalUrl: String,
-  spaceBasedAt: basedAtSchema
+  basedAt: basedAtSchema
 })
 
 var atIdMapping = Schema({

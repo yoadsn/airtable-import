@@ -4,6 +4,8 @@ import Airtable from 'airtable'
 import slug from 'slug';
 import addressParser from 'parse-address';
 import GoogleMaps from '@google/maps';
+
+import getBaseChanges from './airtableHistory.js';
 import { ATIDMapping, Space, Maker, Item, Pop, View, Image } from './mongoschema.js'
 
 let googleMapsClient = GoogleMaps.createClient({
@@ -132,7 +134,7 @@ const extractSpaceData = async (importedRecord) => ({
   titleImage: await getImageDataFromImageRemoteId(importedRecord.get('Title Image')),
   externalUrl: importedRecord.get('Site URL'),
   type: importedRecord.get('Space Type'),
-  spaceBasedAt: await generateBasedAtFromPlaceID(importedRecord.get('Google Space ID')),
+  basedAt: await generateBasedAtFromPlaceID(importedRecord.get('Google Space ID')),
 });
 
 const extractMakerData = async (importedRecord) => ({
@@ -143,7 +145,7 @@ const extractMakerData = async (importedRecord) => ({
   titleImage: await getImageDataFromImageRemoteId(importedRecord.get('Title Image')),
   externalUrl: importedRecord.get('Site URL'),
   type: importedRecord.get('Maker Type'),
-  makerBasedAt: await generateBasedAtFromAddress(importedRecord.get('Location'))
+  basedAt: await generateBasedAtFromAddress(importedRecord.get('Location'))
 });
 
 const extractItemData = async (importedRecord) => ({
@@ -194,6 +196,12 @@ const importEnabled = {
 }
 
 export const runImport = async () => {
+
+  /*
+  let z = await getBaseChanges();
+  console.dir(z);
+  return;
+  */
 
   let base = getAirTableBase();
 
