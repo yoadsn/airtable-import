@@ -8,6 +8,7 @@ var basedAtSchema = Schema({
     zip: String,
     country: String
   },
+  rawAddress: String,
   location: {
     type: { type: String },
     coordinates: [Number]
@@ -81,6 +82,27 @@ var atIdMapping = Schema({
   collection: 'at_id_mapping'
 });
 
+var atImageUsage = Schema({
+  remoteId: String,
+  typeName: String,
+  localId:Schema.Types.ObjectId
+},{
+  collection: 'at_image_usage'
+})
+
+var cdImageInfoCache = Schema({
+  publicId: String,
+  info : {
+    width: Number,
+    height: Number,
+    leadColor: String,
+    created_at: Date,
+    version: Number
+  }
+},{
+  collection: 'cd_image_info_cache'
+})
+
 const Maker = mongoose.model('Maker', makerSchema);
 const Pop = mongoose.model('Pop', popSchema);
 const Item = mongoose.model('Item', itemSchema);
@@ -88,6 +110,8 @@ const View = mongoose.model('View', viewSchema);
 const Space = mongoose.model('Space', spaceSchema);
 const Image = mongoose.model('Image', imageSchema);
 const ATIDMapping = mongoose.model('ATIDMapping', atIdMapping);
+const ATImageUsage = mongoose.model('ATImageUsage', atImageUsage);
+const CDImageInfoCache = mongoose.model('CDImageInfoCache', cdImageInfoCache);
 
 export {
   Maker,
@@ -96,5 +120,7 @@ export {
   View,
   Space,
   Image,
-  ATIDMapping
+  ATIDMapping,
+  ATImageUsage,
+  CDImageInfoCache
 };

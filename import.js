@@ -6,7 +6,7 @@ import addressParser from 'parse-address';
 import GoogleMaps from '@google/maps';
 
 import getBaseChanges from './airtableHistory.js';
-import { ATIDMapping, Space, Maker, Item, Pop, View, Image } from './mongoschema.js'
+import { ATIDMapping, Space, Maker, Item, Pop, View, Image, ATImageUsage, CDImageInfoCache } from './mongoschema.js'
 
 let googleMapsClient = GoogleMaps.createClient({
   key: process.env.GOOGLE_API_KEY,
@@ -29,17 +29,40 @@ const configureCloudinary = () => {
 };
 
 const getImageInformation = async (publicId) => {
-  return new Promise((res, rej) => {
-    cloudinary.api.resource(publicId, result => {
-      res({
-        width: result.width,
-        height: result.height,
-        leadColor: result.colors[0][0]
+  let cachedInfo  = await CDImageInfoCache.findOne({ publicId });
+  if (cachedInfo) {
+      console.log('used cached image info');
+      return cachedInfo.toObject().info;
+  } else {
+    let result = await new Promise((res, rej) => {
+      console.log('Need to consult cloudinary api');
+      cloudinary.api.resource(publicId, imageInfo => {
+        if (imageInfo.error) {
+          rej(imageInfo.error)
+        } else {
+          res({
+            version: imageInfo.version,
+            created_at: imageInfo.created_at,
+            width: imageInfo.width,
+            height: imageInfo.height,
+            leadColor: imageInfo.colors[0][0]
+          });
+        }
+      }, {
+        colors: true
       });
-    }, {
-      colors: true
+    }).catch(err => {
+      console.error(err);
+      return null;
     });
-  });
+
+    if (result) {
+      console.log('storing image cache');
+      await CDImageInfoCache.create({ publicId, info: result });
+    }
+
+    return result;
+  }
 }
 
 const getLocalIdForRemoteId = async (remoteId) => {
@@ -54,10 +77,18 @@ const getLocalIdForRemoteId = async (remoteId) => {
   return idmap.localId;
 }
 
-const getImageDataFromImageRemoteId = async (remoteId) => {
+const getImageDataFromImageRemoteId = async (remoteId, usageLocalId, typeName) => {
   if (!remoteId || remoteId.length == 0) return null;
   let localImageId = await getLocalIdForRemoteId(remoteId[0]);
   let image = await Image.findOne({ _id: localImageId});
+  if (image) {
+    // Store this image usage if not mapped already
+    let foundUsage = await ATImageUsage.find({ remoteId, localId: usageLocalId });
+    if (foundUsage.length === 0) {
+      let usage = new ATImageUsage({ remoteId, typeName, localId: usageLocalId})
+      await usage.save();
+    }
+  }
   return image && image.toObject();
 }
 
@@ -81,7 +112,7 @@ const storeToDB = async (importedRecords, Model, extractRecordData, remoteIdGene
   await importedRecords.reduce((acc, curr, idx) => {
     const storeOne = async () => {
       let localId = await getLocalIdForRemoteId(remoteIdGenerator(curr.getId()))
-      let extractedData = await extractRecordData(curr);
+      let extractedData = await extractRecordData(curr, localId);
       await Model.findOneAndUpdate({ _id: localId}, extractedData, { upsert: true })
     }
 
@@ -92,15 +123,28 @@ const storeToDB = async (importedRecords, Model, extractRecordData, remoteIdGene
 
 const viewRemoteIdGeneratorFromPop = (id) => 'view.' + id;
 
-const generateBasedAtFromGooglePlaceResult = (result) => {
-  let streetNoComp = result.address_components.find(comp => comp.types.includes('street_number')).long_name;
-  let routeComp = result.address_components.find(comp => comp.types.includes('route')).short_name;
-  let cityComp = result.address_components.find(comp => comp.types.includes('locality')).long_name;
-  let stateComp = result.address_components.find(comp => comp.types.includes('administrative_area_level_1')).short_name;
-  let zipComp = result.address_components.find(comp => comp.types.includes('postal_code')).long_name;
-  let countryComp = result.address_components.find(comp => comp.types.includes('country')).long_name;
+const getAddressComponentValue = (components, type, nameField) => {
+  if (components) {
+    let foundComponent = components.find(comp => comp.types.includes(type))
+    if (foundComponent) {
+      return foundComponent[nameField];
+    }
+  }
 
-  let street = [streetNoComp, routeComp].join(' ');
+  return null;
+}
+
+const generateBasedAtFromGooglePlaceResult = (result) => {
+  if (!result) return null;
+
+  let streetNoComp = getAddressComponentValue(result.address_components, 'street_number', 'long_name');
+  let routeComp = getAddressComponentValue(result.address_components, 'route', 'short_name');
+  let cityComp = getAddressComponentValue(result.address_components, 'locality', 'long_name');
+  let stateComp = getAddressComponentValue(result.address_components, 'administrative_area_level_1', 'short_name');
+  let zipComp = getAddressComponentValue(result.address_components, 'postal_code', 'long_name');
+  let countryComp = getAddressComponentValue(result.address_components, 'country', 'long_name');
+
+  let street = [streetNoComp, routeComp].join(' ').trim();
 
   return {
     address : {
@@ -119,58 +163,65 @@ const generateBasedAtFromGooglePlaceResult = (result) => {
 
 const generateBasedAtFromAddress = async (address) =>
   googleMapsClient.geocode({ address }).asPromise()
-    .then(response => generateBasedAtFromGooglePlaceResult(response.json.results[0]));
+    .then(response => generateBasedAtFromGooglePlaceResult(response.json.results[0]))
+    .then(result => {
+      if (result) {
+        result.rawAddress = address;
+      }
+      return result;
+    });
 
 const generateBasedAtFromPlaceID = async (placeId) =>
   googleMapsClient.place({ placeid: placeId}).asPromise()
     .then(response => generateBasedAtFromGooglePlaceResult(response.json.result));
 
-const extractSpaceData = async (importedRecord) => ({
+const extractSpaceData = async (importedRecord, localId) => ({
   name: importedRecord.get('Name'),
   googleSpaceId: importedRecord.get('Google Space ID'),
   slug: slug(importedRecord.get('Name')),
   descriptionHtml: importedRecord.get('Description'),
-  logoImage: await getImageDataFromImageRemoteId(importedRecord.get('Logo Image')),
-  titleImage: await getImageDataFromImageRemoteId(importedRecord.get('Title Image')),
+  logoImage: await getImageDataFromImageRemoteId(importedRecord.get('Logo Image'), localId, Space.modelName),
+  titleImage: await getImageDataFromImageRemoteId(importedRecord.get('Title Image'), localId, Space.modelName),
   externalUrl: importedRecord.get('Site URL'),
   type: importedRecord.get('Space Type'),
   basedAt: await generateBasedAtFromPlaceID(importedRecord.get('Google Space ID')),
 });
 
-const extractMakerData = async (importedRecord) => ({
+const extractMakerData = async (importedRecord, localId) => ({
   name: importedRecord.get('Name'),
   slug: slug(importedRecord.get('Name')),
   descriptionHtml: importedRecord.get('Description'),
-  logoImage: await getImageDataFromImageRemoteId(importedRecord.get('Logo Image')),
-  titleImage: await getImageDataFromImageRemoteId(importedRecord.get('Title Image')),
+  logoImage: await getImageDataFromImageRemoteId(importedRecord.get('Logo Image'), localId, Maker.modelName),
+  titleImage: await getImageDataFromImageRemoteId(importedRecord.get('Title Image'), localId, Maker.modelName),
   externalUrl: importedRecord.get('Site URL'),
   type: importedRecord.get('Maker Type'),
   basedAt: await generateBasedAtFromAddress(importedRecord.get('Location'))
 });
 
-const extractItemData = async (importedRecord) => ({
+const extractItemData = async (importedRecord, localId) => ({
   name: importedRecord.get('Name'),
   maker: await getLocalIdForRemoteId(importedRecord.get('Maker')),
   descriptionHtml: importedRecord.get('Description'),
-  titleImage: await getImageDataFromImageRemoteId(importedRecord.get('Item Image')),
+  titleImage: await getImageDataFromImageRemoteId(importedRecord.get('Item Image'), localId, Item.modelName),
   externalUrl: importedRecord.get('Shoppable Link'),
 });
 
-const extractViewData = async (importedRecord) => ({
+const extractViewData = async (importedRecord, localId) => ({
   space: await getLocalIdForRemoteId(importedRecord.get('Space')),
-  titleImage: await getImageDataFromImageRemoteId(importedRecord.get('Longhost POP Image'))
+  titleImage: await getImageDataFromImageRemoteId(importedRecord.get('Longhost POP Image'), localId, View.modelName)
 });
 
-const extractPopData = async (importedRecord) => ({
+const extractPopData = async (importedRecord, localId) => ({
   view: await getLocalIdForRemoteId(viewRemoteIdGeneratorFromPop(importedRecord.getId())),
   item: await getLocalIdForRemoteId(importedRecord.get('Item')),
   descriptionHtml: importedRecord.get('Description'),
-  closeupImage: await getImageDataFromImageRemoteId(importedRecord.get('Closeup POP Image'))
+  closeupImage: await getImageDataFromImageRemoteId(importedRecord.get('Closeup POP Image'), localId, Pop.modelName)
 });
 
 const extractExtraImageInformation = async (publicId) => {
   let imageData = await getImageInformation(publicId);
-  return {
+
+  return imageData && {
     dimensions: {
         aspectRatio: imageData.width / imageData.height
     },
@@ -180,7 +231,7 @@ const extractExtraImageInformation = async (publicId) => {
   }
 }
 
-const extractImageData = async (importedRecord) => ({
+const extractImageData = async (importedRecord, localId) => ({
   publicId: importedRecord.get('Public ID'),
   creditsTo: importedRecord.get('Credits To'),
   creditsLink: importedRecord.get('Credits Link'),
@@ -209,7 +260,7 @@ export const runImport = async () => {
 
   if (importEnabled['images']) {
     let images = await loadFromAirTable(base, 'images', { fields : ['Public ID', 'Credits To', 'Credits Link'] });
-    images = images.filter(space => space.get('Public ID'));
+    images = images.filter(image => image.get('Public ID'));
     console.log(`got ${images.length} images`);
     await storeToDB(images, Image, extractImageData);
     console.log(`image storing done.`);
