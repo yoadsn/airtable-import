@@ -67,7 +67,7 @@ var spaceSchema = Schema({
   name: String,
   googleSpaceId: String,
   slug: { type: String, index: true },
-  type: String,
+  types: [String],
   descriptionHtml: String,
   logoImage: imageDataSchema,
   titleImage: imageDataSchema,

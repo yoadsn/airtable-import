@@ -240,10 +240,10 @@ const extractImageData = async (importedRecord, localId) => ({
 
 const importEnabled = {
   'images' : 0,
-  'spaces' : 1,
+  'spaces' : 0,
   'makers': 1,
-  'items': 1,
-  'pops': 1
+  'items': 0,
+  'pops': 0
 }
 
 export const runImport = async () => {
@@ -267,7 +267,7 @@ export const runImport = async () => {
   }
 
   if (importEnabled['spaces']) {
-    let spaces = await loadFromAirTable(base, 'Spaces');
+    let spaces = await loadFromAirTable(base, 'Spaces', { filterByFormula: '{Name} = "Twenty Five Lusk "'});
     spaces = spaces.filter(space => space.get('Name'));
     console.log(`got ${spaces.length} spaces`);
     await storeToDB(spaces, Space, extractSpaceData);
@@ -275,7 +275,7 @@ export const runImport = async () => {
   }
 
   if (importEnabled['makers']) {
-    let makers = await loadFromAirTable(base, 'Makers');
+    let makers = await loadFromAirTable(base, 'Makers', { filterByFormula: '{Name} = "Doug Garofalo "'});
     makers = makers.filter(maker => maker.get('Name'));
     console.log(`got ${makers.length} makers`);
     await storeToDB(makers, Maker, extractMakerData);
