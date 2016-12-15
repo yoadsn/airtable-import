@@ -267,7 +267,7 @@ export const runImport = async () => {
   }
 
   if (importEnabled['spaces']) {
-    let spaces = await loadFromAirTable(base, 'Spaces', { filterByFormula: '{Name} = "Twenty Five Lusk "'});
+    let spaces = await loadFromAirTable(base, 'Spaces' });
     spaces = spaces.filter(space => space.get('Name'));
     console.log(`got ${spaces.length} spaces`);
     await storeToDB(spaces, Space, extractSpaceData);
@@ -275,7 +275,7 @@ export const runImport = async () => {
   }
 
   if (importEnabled['makers']) {
-    let makers = await loadFromAirTable(base, 'Makers', { filterByFormula: '{Name} = "Doug Garofalo "'});
+    let makers = await loadFromAirTable(base, 'Makers' );
     makers = makers.filter(maker => maker.get('Name'));
     console.log(`got ${makers.length} makers`);
     await storeToDB(makers, Maker, extractMakerData);
