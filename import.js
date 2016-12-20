@@ -2,7 +2,6 @@ import mongoose, { Schema } from 'mongoose'
 import cloudinary from 'cloudinary';
 import Airtable from 'airtable'
 import slug from 'slug';
-import addressParser from 'parse-address';
 import GoogleMaps from '@google/maps';
 
 import getBaseChanges from './airtableHistory.js';
@@ -171,9 +170,22 @@ const generateBasedAtFromAddress = async (address) =>
       return result;
     });
 
-const generateBasedAtFromPlaceID = async (placeId) =>
-  googleMapsClient.place({ placeid: placeId}).asPromise()
-    .then(response => generateBasedAtFromGooglePlaceResult(response.json.result));
+const generateBasedAtFromPlaceID = async (placeId) => {
+  if (!placeId) {
+    console.error('Space did not provide a placeId - skipping "basedAt" transformation');
+    return null;
+  }
+
+  let result = await googleMapsClient.place({ placeid: placeId}).asPromise()
+    .then(response => generateBasedAtFromGooglePlaceResult(response.json.result))
+    .catch(error => {
+      console.error(error);
+      console.dir(error);
+      return null;
+    });
+
+  return result;
+}
 
 const extractSpaceData = async (importedRecord, localId) => ({
   name: importedRecord.get('Name'),
@@ -240,8 +252,8 @@ const extractImageData = async (importedRecord, localId) => ({
 
 const importEnabled = {
   'images' : 0,
-  'spaces' : 0,
-  'makers': 1,
+  'spaces' : 1,
+  'makers': 0,
   'items': 0,
   'pops': 0
 }
@@ -267,7 +279,7 @@ export const runImport = async () => {
   }
 
   if (importEnabled['spaces']) {
-    let spaces = await loadFromAirTable(base, 'Spaces' });
+    let spaces = await loadFromAirTable(base, 'Spaces' /*, {filterByFormula: `RECORD_ID()="rec8V3IhVMhYA1KMD"`}*/);
     spaces = spaces.filter(space => space.get('Name'));
     console.log(`got ${spaces.length} spaces`);
     await storeToDB(spaces, Space, extractSpaceData);
@@ -275,7 +287,7 @@ export const runImport = async () => {
   }
 
   if (importEnabled['makers']) {
-    let makers = await loadFromAirTable(base, 'Makers' );
+    let makers = await loadFromAirTable(base, 'Makers');
     makers = makers.filter(maker => maker.get('Name'));
     console.log(`got ${makers.length} makers`);
     await storeToDB(makers, Maker, extractMakerData);

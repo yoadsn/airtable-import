@@ -21,9 +21,11 @@
     "airtable": "^0.4.2",
     "cloudinary": "^1.4.4",
     "express": "^4.14.0",
-    "lodash": "^4.16.6",
+    "lodash": "^4.17.2",
     "mongoose": "^4.6.3",
-    "parse-address": "0.0.6",
-    "slug": "^0.9.1"
+    "pretty-error": "^2.0.2",
+    "slug": "^0.9.1",
+    "warning": "^3.0.0",
+    "winston": "^2.3.0"
   }
 }
